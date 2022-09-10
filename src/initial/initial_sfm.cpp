@@ -19,7 +19,7 @@ void GlobalSFM::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen::Matr
 	point_3d(2) = triangulated_point(2) / triangulated_point(3);
 }
 
-//输入：前一帧的R，T，当前帧的索引i
+//输出：第l帧到当前帧的R t
 bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
 								vector<SFMFeature> &sfm_f)
 {
@@ -56,7 +56,8 @@ bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
 	cv::eigen2cv(P_initial, t);
 	cv::Mat K = (cv::Mat_<double>(3, 3) << 1, 0, 0, 0, 1, 0, 0, 0, 1);
 	bool pnp_succ;
-	pnp_succ = cv::solvePnP(pts_3_vector, pts_2_vector, K, D, rvec, t, 1);  //得到了第i帧(l之后的帧)到第l帧的旋转平移    
+	//OK得到了第l帧到第i帧(l之后的帧)的旋转平移
+	pnp_succ = cv::solvePnP(pts_3_vector, pts_2_vector, K, D, rvec, t, 1);  //E得到了第i帧(l之后的帧)到第l帧的旋转平移    
 	if(!pnp_succ)
 	{
 		return false;
@@ -118,6 +119,7 @@ void GlobalSFM::triangulateTwoFrames(int frame0, Eigen::Matrix<double, 3, 4> &Po
 // relative_t[i][j]  j_t_ji  (j < i)
 //根据当前帧到第l帧的relative_R，relative_T，对窗口中每个图像帧求解sfm问题，
 //得到所有图像帧相对于参考帧 l的旋转四元数Q、平移向量T和特征点坐标sfm_tracked_points
+//myown :q T表示当前帧到第l（参考）帧的变换  主要点：明确cv::solvePnP得到的是w到c(myown对)，否则是c到w（上面对）
 bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 			  const Matrix3d relative_R, const Vector3d relative_T,
 			  vector<SFMFeature> &sfm_f, map<int, Vector3d> &sfm_tracked_points)
@@ -306,7 +308,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	// 返回特征点l系下3D坐标和优化后的全局位姿 
 	for (int i = 0; i < frame_num; i++)
 	{
-		q[i].w() = c_rotation[i][0]; 
+		q[i].w() = c_rotation[i][0]; // l到i帧的变换
 		q[i].x() = c_rotation[i][1]; 
 		q[i].y() = c_rotation[i][2]; 
 		q[i].z() = c_rotation[i][3]; 
