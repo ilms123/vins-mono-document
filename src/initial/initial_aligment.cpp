@@ -16,7 +16,8 @@ void solveGyroscopeBias(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs)
         tmp_A.setZero();
         VectorXd tmp_b(3);
         tmp_b.setZero();
-        Eigen::Quaterniond q_ij(frame_i->second.R.transpose() * frame_j->second.R);
+        //相当于q_bk_bk+1的理论值，而预积分的delta_q为估计值
+        Eigen::Quaterniond q_ij(frame_i->second.R.transpose() * frame_j->second.R);  //q_bk_bk+1=q_cl_bk.transpose()*q_cl_bk+1
         tmp_A = frame_j->second.pre_integration->jacobian.template block<3, 3>(O_R, O_BG);
         tmp_b = 2 * (frame_j->second.pre_integration->delta_q.inverse() * q_ij).vec();
         A += tmp_A.transpose() * tmp_A;
@@ -121,7 +122,7 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
     }   
     g = g0;
 }
-
+// 利用IMU的平移约束估计重力方向/各b_k帧速度/尺度scalerbool
 bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, VectorXd &x)
 {
     int all_frame_count = all_image_frame.size();
@@ -135,6 +136,7 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
     map<double, ImageFrame>::iterator frame_i;
     map<double, ImageFrame>::iterator frame_j;
     int i = 0;
+    // 构造Ax=b等式 
     for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end(); frame_i++, i++)
     {
         frame_j = next(frame_i);
@@ -177,15 +179,18 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
     A = A * 1000.0;
     b = b * 1000.0;
     x = A.ldlt().solve(b);
+    /* 这里为什么要除以100，就是因为前面tmp_A.block<3, 1>(0, 9)构建的时候除以了100，
+    因此最小二乘解出的尺度系数是原来的100倍 */
     double s = x(n_state - 1) / 100.0;
     // ROS_DEBUG("estimated scale: %f", s);
     g = x.segment<3>(n_state - 4);
     // ROS_DEBUG_STREAM(" result g     " << g.norm() << " " << g.transpose());
+    // 如果重力加速度与参考值差太大或者尺度为负则说明计算错误  
     if(fabs(g.norm() - G.norm()) > 1.0 || s < 0)
     {
         return false;
     }
-
+    // ！！！ 利用gw的模长已知这个先验条件进一步优化gc0(下面接着介绍)
     RefineGravity(all_image_frame, g, x);
     s = (x.tail<1>())(0) / 100.0;
     (x.tail<1>())(0) = s;
@@ -198,8 +203,10 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
 
 bool VisualIMUAlignment(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs, Vector3d &g, VectorXd &x)
 {
-    solveGyroscopeBias(all_image_frame, Bgs);
-
+    // 利用相机旋转约束标定IMU角速度bias
+    solveGyroscopeBias(all_image_frame, Bgs);    //此时all_image_frame中的ImageFrame中R T表示 Tcl_bi 当前imu帧到相机参考帧l的变换
+    // 利用IMU的平移约束估计重力方向/各b_k帧速度/尺度scaler
+    //如果计算的g与世界G相差过大、计算出尺度s<0，返回false
     if(LinearAlignment(all_image_frame, g, x))
         return true;
     else 

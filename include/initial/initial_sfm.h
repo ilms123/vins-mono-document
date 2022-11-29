@@ -15,9 +15,9 @@ using namespace std;
 
 struct SFMFeature
 {
-    bool state;
-    int id;
-    vector<pair<int,Vector2d>> observation;   //所有观测到该特征点的 图像帧ID 和 特征点在这个图像帧的归一化坐标 
+    bool state;   //表明是否进行三角话
+    int id;      // feature_id
+    vector<pair<int,Vector2d>> observation;   //所有观测到该特征点的 图像帧ID（第一次观测到该特征的点） 和 特征点在这个图像帧的归一化坐标 
     double position[3];
     double depth;
 };
@@ -29,7 +29,7 @@ struct ReprojectionError3D
 		{}
 
 	template <typename T>
-	bool operator()(const T* const camera_R, const T* const camera_T, const T* point, T* residuals) const
+	bool operator()(const T* const camera_R, const T* const camera_T, const T* point, T* residuals) const    //函数体后加const表示该函数不会修改任何数据成员
 	{
 		T p[3];
 		ceres::QuaternionRotatePoint(camera_R, point, p);

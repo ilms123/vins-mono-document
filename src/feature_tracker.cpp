@@ -77,7 +77,10 @@ void FeatureTracker::addPoints()
         track_cnt.push_back(1);
     }
 }
-
+/*
+过程为：首帧提取特征goodFeaturesToTrack，后续帧采用光流跟踪
+对所有帧进行光流跟踪提取特征点，只对将要发布的帧重新提取特征
+*/
 void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
 {
     cv::Mat img;
@@ -124,7 +127,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         //ROS_DEBUG("temporal optical flow costs: %fms", t_o.toc());
     }
 
-    //跟踪到的角点次数+1
+    //只针对发布的帧跟踪到的角点次数+1
     for (auto &n : track_cnt)
         n++;
 
@@ -185,7 +188,7 @@ void FeatureTracker::rejectWithF()
             tmp_p.x() = FOCAL_LENGTH * tmp_p.x() / tmp_p.z() + COL / 2.0;
             tmp_p.y() = FOCAL_LENGTH * tmp_p.y() / tmp_p.z() + ROW / 2.0;
             un_cur_pts[i] = cv::Point2f(tmp_p.x(), tmp_p.y());
-
+            //
             m_camera->liftProjective(Eigen::Vector2d(forw_pts[i].x, forw_pts[i].y), tmp_p);
             tmp_p.x() = FOCAL_LENGTH * tmp_p.x() / tmp_p.z() + COL / 2.0;
             tmp_p.y() = FOCAL_LENGTH * tmp_p.y() / tmp_p.z() + ROW / 2.0;
@@ -272,6 +275,7 @@ void FeatureTracker::undistortedPoints()
         Eigen::Vector2d a(cur_pts[i].x, cur_pts[i].y);
         Eigen::Vector3d b;
         // liftProjective（）将图像特征点的坐标a映射到空间坐标b，里面涉及处理畸变的过程。最后得到俩组特征点的位置 
+        //图像点dist——归一化dist——归一化undist
         m_camera->liftProjective(a, b);
         cur_un_pts.push_back(cv::Point2f(b.x() / b.z(), b.y() / b.z()));
         //cur_un_pts_map表示i个特征点对应的cmaera下的归一化坐标

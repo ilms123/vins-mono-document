@@ -65,10 +65,10 @@ public:
     bool IsFixed() const { return fixed_; }
 
 protected:
-    VecX parameters_;   // 实际存储的变量值
-    VecX parameters_backup_; // 每次迭代优化中对参数进行备份，用于回滚
-    int local_dimension_;   // 局部参数化维度
-    unsigned long id_;  // 顶点的id，自动生成
+    VecX parameters_;          // 实际存储的变量值
+    VecX parameters_backup_;  // 每次迭代优化中对参数进行备份，用于回滚
+    int local_dimension_;    // 局部参数化维度
+    unsigned long id_;      // 顶点的id，自动生成
 
     /// ordering id是在problem中排序后的id，用于寻找雅可比对应块
     /// ordering id带有维度信息，例如ordering_id=6则对应Hessian中的第6列

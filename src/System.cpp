@@ -119,6 +119,7 @@ void System::PubImageData(double dStampSec, Mat &img)
             auto &pts_velocity = trackerData[i].pts_velocity;
             for (unsigned int j = 0; j < ids.size(); j++)
             {
+                //只有track_cnt[j]>1，即至少两帧观测到的特征，才可发布feature_buf
                 if (trackerData[i].track_cnt[j] > 1)
                 {
                     int p_id = ids[j];
@@ -127,7 +128,7 @@ void System::PubImageData(double dStampSec, Mat &img)
                     double y = un_pts[j].y;
                     double z = 1;
                     feature_points->points.push_back(Vector3d(x, y, z));
-                    feature_points->id_of_point.push_back(p_id * NUM_OF_CAM + i);
+                    feature_points->id_of_point.push_back(p_id * NUM_OF_CAM + i);  //需要此操作是因为只对相机0更新了id　trackerData[0].updateID(i)ｓ
                     feature_points->u_of_point.push_back(cur_pts[j].x);
                     feature_points->v_of_point.push_back(cur_pts[j].y);
                     feature_points->velocity_x_of_point.push_back(pts_velocity[j].x);
@@ -261,7 +262,9 @@ void System::ProcessBackEnd()
         // 在提取measurements时互斥锁m_buf会锁住，此时无法接收数据;等待measurements上面两个接收数据完成就会被唤醒
         //调用了wait函数，条件变量的对象con和互斥锁lk绑定，之后判断第二个参数。
         //wait调用后，会先释放锁 lk->unlock() ，之后进入等待状态；当其它进程调用通知激活后，会再次加锁
-        //my own :如果返回为true，则继续向下执行，否则 block住，直到有notify_one时才被激活。被激活后，再次对m_buf加锁
+        //my own :刚开始，线程在此处block住，并解锁lk->unlock()，进行条件判断：
+        //如果返回为true，此线程加入竞争队列，获得竞争权则再次对m_buf加锁lock住，向下进行
+        //如果返回为false，继续block住，直到有notify_one时才被激活，进行竞争
         con.(lk, [&] {
             return (measurements = getMeasurements()).size() != 0;
         });
@@ -327,9 +330,10 @@ void System::ProcessBackEnd()
             map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> image;
             for (unsigned int i = 0; i < img_msg->points.size(); i++) 
             {
-                // myown:id_of_point 索引idex表示3d点对应该图中特征点的索引，value表示滑窗内总的特征id
+                // myown:id_of_point 表示特征点在整个追踪过程中的索引
+                //索引idex表示3d点对应该图中特征点的索引，value表示滑窗内总的特征id
                 int v = img_msg->id_of_point[i] + 0.5;
-                int feature_id = v / NUM_OF_CAM;
+                int feature_id = v / NUM_OF_CAM;　　　//与 System::PubImageData() 113行对应
                 int camera_id = v % NUM_OF_CAM;
                 double x = img_msg->points[i].x();
                 double y = img_msg->points[i].y();

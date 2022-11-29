@@ -12,7 +12,7 @@ double MIN_PARALLAX;
 double ACC_N, ACC_W;
 double GYR_N, GYR_W;
 
-vector<Eigen::Matrix3d> RIC;
+vector<Eigen::Matrix3d> RIC;   //表示Rbc 
 vector<Eigen::Vector3d> TIC;
 
 Eigen::Vector3d G{0.0, 0.0, 9.8};

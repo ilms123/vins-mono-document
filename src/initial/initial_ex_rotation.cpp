@@ -8,13 +8,17 @@ InitialEXRotation::InitialEXRotation(){
     ric = Matrix3d::Identity();
 }
 
-// 标定imu和相机之间的旋转外参，通过imu和图像计算的旋转使用手眼标定计算获得
+/* 标定imu和相机之间的旋转外参，通过imu和图像计算的旋转使用手眼标定计算获得
+输入：delta_q_imu为q{bk+1,bk}
+*/
 bool InitialEXRotation::CalibrationExRotation(vector<pair<Vector3d, Vector3d>> corres, Quaterniond delta_q_imu, Matrix3d &calib_ric_result)
 {
     frame_count++;
-    //利用帧可视的3D点求解相邻两帧之间的旋转矩阵R_{ck,ck+1}
+    //利用帧可视的3D点求解相邻两帧之间的旋转矩阵R_{ck,ck+1} erro吧
+    //my own :R_{ck+1,ck}
     Rc.push_back(solveRelativeR(corres));
     //delta_q_imu为IMU预积分得到的旋转四元数，转换成矩阵形式存入Rimu当中。则Rimu中存放的是imu预积分得到的旋转矩阵
+    ////my own :R_{bk+1,bk}
     Rimu.push_back(delta_q_imu.toRotationMatrix());
 
     //通过旋转约束计算出来的R_{ck,ck+1}
@@ -35,6 +39,7 @@ bool InitialEXRotation::CalibrationExRotation(vector<pair<Vector3d, Vector3d>> c
         ++sum_ok;
         Matrix4d L, R;
         //求取系数矩阵 ，分别得到四元数的左右乘
+        //参考ppt第七章式（5）但有区别， 公式为：qcb*q_bk+1_bk=q_ck+1_ck*qcb
         double w = Quaterniond(Rc[i]).w();
         Vector3d q = Quaterniond(Rc[i]).vec();
         L.block<3, 3>(0, 0) = w * Matrix3d::Identity() + Utility::skewSymmetric(q);
@@ -56,7 +61,7 @@ bool InitialEXRotation::CalibrationExRotation(vector<pair<Vector3d, Vector3d>> c
     JacobiSVD<MatrixXd> svd(A, ComputeFullU | ComputeFullV);
     Matrix<double, 4, 1> x = svd.matrixV().col(3);
     Quaterniond estimated_R(x);
-    //?????????????inverse() why???????????????????????????????????
+    //注，取逆表示计算公式与ppt中不同，公式为：qcb*q_bk+1_bk=q_ck+1_ck*qcb
     ric = estimated_R.toRotationMatrix().inverse();
     //cout << svd.singularValues().transpose() << endl;
     //cout << ric << endl;
@@ -74,7 +79,7 @@ bool InitialEXRotation::CalibrationExRotation(vector<pair<Vector3d, Vector3d>> c
     else
         return false;
 }
-
+//返回解出来的是R21
 Matrix3d InitialEXRotation::solveRelativeR(const vector<pair<Vector3d, Vector3d>> &corres)
 {
     if (corres.size() >= 9)

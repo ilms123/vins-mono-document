@@ -41,7 +41,11 @@ int FeatureManager::getFeatureCount()
     return cnt;
 }
 
-
+/*检测当前帧跟踪到的特征点数量以及视差：
+1.如果跟踪到特征<20,返回true ,margin掉最老帧
+2.计算倒数二、三帧的视差，视差过小则margin掉第二新帧
+更新feature_manager中的feature（添加feature和观测）
+*/
 bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> &image, double td)
 {
     //ROS_DEBUG("input feature: %d", (int)image.size());
@@ -75,7 +79,7 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
 
     if (frame_count < 2 || last_track_num < 20)
         return true;
-
+    //计算每个特征在次新帧和次次新帧中的视差 
     for (auto &it_per_id : feature)
     {
         // 观测该特征点的：起始帧小于倒数第三帧，终止帧要大于倒数第二帧，保证至少有两帧能观测到。  
@@ -121,7 +125,7 @@ void FeatureManager::debugShow()
         assert(it.used_num == sum);
     }
 }
-
+//取出feature中可被两帧观测到的3D点
 vector<pair<Vector3d, Vector3d>> FeatureManager::getCorresponding(int frame_count_l, int frame_count_r)
 {
     vector<pair<Vector3d, Vector3d>> corres;
@@ -186,7 +190,7 @@ void FeatureManager::clearDepth(const VectorXd &x)
         it_per_id.estimated_depth = 1.0 / x(++feature_index);
     }
 }
-
+//计算逆深度
 VectorXd FeatureManager::getDepthVector()
 {
     VectorXd dep_vec(getFeatureCount());
@@ -204,7 +208,9 @@ VectorXd FeatureManager::getDepthVector()
     }
     return dep_vec;
 }
-
+/*输入：（初始化时）Ps表示 Tcl_ci 当前imu帧到相机参考帧l的变换(函数内标注均为初始化时的含义) ，（滑动窗口时）Ps表示 Tw_ci
+输出/更新：三角化更新feature中的estimated_depth
+*/
 void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic[], Matrix3d ric[])
 {
     for (auto &it_per_id : feature)
@@ -221,21 +227,22 @@ void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic[], Matrix3d ric[])
         Eigen::MatrixXd svd_A(2 * it_per_id.feature_per_frame.size(), 4);
         int svd_idx = 0;
 
+        //通过当前imu帧到w的位姿 计算 当前相机帧到imu的位姿
         Eigen::Matrix<double, 3, 4> P0;
-        Eigen::Vector3d t0 = Ps[imu_i] + Rs[imu_i] * tic[0];
-        Eigen::Matrix3d R0 = Rs[imu_i] * ric[0];
+        Eigen::Vector3d t0 = Ps[imu_i] + Rs[imu_i] * tic[0];   //tcl_ci=Ps_cl_ci+Rcl_bi*tic
+        Eigen::Matrix3d R0 = Rs[imu_i] * ric[0];                //Rcl_ci
         P0.leftCols<3>() = Eigen::Matrix3d::Identity();
         P0.rightCols<1>() = Eigen::Vector3d::Zero();
-
+        //起始帧点与各个观测构建三角化
         for (auto &it_per_frame : it_per_id.feature_per_frame)
         {
             imu_j++;
 
-            Eigen::Vector3d t1 = Ps[imu_j] + Rs[imu_j] * tic[0];
-            Eigen::Matrix3d R1 = Rs[imu_j] * ric[0];
-            Eigen::Vector3d t = R0.transpose() * (t1 - t0);
-            Eigen::Matrix3d R = R0.transpose() * R1;
-            Eigen::Matrix<double, 3, 4> P;
+            Eigen::Vector3d t1 = Ps[imu_j] + Rs[imu_j] * tic[0]; 
+            Eigen::Matrix3d R1 = Rs[imu_j] * ric[0];      
+            Eigen::Vector3d t = R0.transpose() * (t1 - t0); //tci_cj
+            Eigen::Matrix3d R = R0.transpose() * R1;   //Rci_cj 
+            Eigen::Matrix<double, 3, 4> P;   //计算在初始观测帧下的3d坐标，得到对应深度  Tcj_ci
             P.leftCols<3>() = R.transpose();
             P.rightCols<1>() = -R.transpose() * t;
             Eigen::Vector3d f = it_per_frame.point.normalized();
@@ -246,12 +253,12 @@ void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic[], Matrix3d ric[])
                 continue;
         }
         assert(svd_idx == svd_A.rows());
-        Eigen::Vector4d svd_V = Eigen::JacobiSVD<Eigen::MatrixXd>(svd_A, Eigen::ComputeThinV).matrixV().rightCols<1>();
+        Eigen::Vector4d svd_V = Eigen::JacobiSVD<Eigen::MatrixXd>(svd_A, Eigen::ComputeThinV).matrixV().rightCols<1>();   //在参考帧l下的3D点
         double svd_method = svd_V[2] / svd_V[3];
         //it_per_id->estimated_depth = -b / A;
         //it_per_id->estimated_depth = svd_V[2] / svd_V[3];
 
-        it_per_id.estimated_depth = svd_method;
+        it_per_id.estimated_depth = svd_method;   //计算在初始观测帧下的位姿
         //it_per_id->estimated_depth = INIT_DEPTH;
 
         if (it_per_id.estimated_depth < 0.1)
@@ -279,6 +286,9 @@ void FeatureManager::removeOutlier()
     }
 }
 
+/* 修改feature的start_frame:
+1)start_frame不为第一帧，直接--；2）start_frame为第一帧，移出观测后，计算其在后一帧的深度
+*/
 void FeatureManager::removeBackShiftDepth(Eigen::Matrix3d marg_R, Eigen::Vector3d marg_P, Eigen::Matrix3d new_R, Eigen::Vector3d new_P)
 {
     for (auto it = feature.begin(), it_next = feature.begin();
@@ -286,12 +296,15 @@ void FeatureManager::removeBackShiftDepth(Eigen::Matrix3d marg_R, Eigen::Vector3
     {
         it_next++;
 
+        // 若第一次出现该特征点的帧不是最老帧 
         if (it->start_frame != 0)
-            it->start_frame--;
+            it->start_frame--;  // 可共视该特征点的所有帧id前移
         else
         {
+            // 若第一次出现该特征点的帧是最老帧 ,获得归一化坐标，移出最老帧
             Eigen::Vector3d uv_i = it->feature_per_frame[0].point;  
             it->feature_per_frame.erase(it->feature_per_frame.begin());
+            // 特征点只在最老帧被观测，则直接移除 
             if (it->feature_per_frame.size() < 2)
             {
                 feature.erase(it);
@@ -299,6 +312,7 @@ void FeatureManager::removeBackShiftDepth(Eigen::Matrix3d marg_R, Eigen::Vector3
             }
             else
             {
+                // 转换到下一帧坐标系下的三维坐标
                 Eigen::Vector3d pts_i = uv_i * it->estimated_depth;
                 Eigen::Vector3d w_pts_i = marg_R * pts_i + marg_P;
                 Eigen::Vector3d pts_j = new_R.transpose() * (w_pts_i - new_P);
@@ -330,6 +344,7 @@ void FeatureManager::removeBack()
             it->start_frame--;
         else
         {
+            // 若第一次出现该特征点的帧是最老帧  
             it->feature_per_frame.erase(it->feature_per_frame.begin());
             if (it->feature_per_frame.size() == 0)
                 feature.erase(it);
@@ -343,6 +358,7 @@ void FeatureManager::removeFront(int frame_count)
     {
         it_next++;
 
+        // 对于特征点，其起始帧为最新帧的，将帧滑动成次新帧 
         if (it->start_frame == frame_count)
         {
             it->start_frame--;
@@ -350,8 +366,10 @@ void FeatureManager::removeFront(int frame_count)
         else
         {
             int j = WINDOW_SIZE - 1 - it->start_frame;
+            //如果次新帧之前已经跟踪结束则什么都不做 
             if (it->endFrame() < frame_count - 1)
                 continue;
+            // 如果在次新帧仍被跟踪，则删除feature_per_frame中次新帧对应的FeaturePerFrame
             it->feature_per_frame.erase(it->feature_per_frame.begin() + j);
             if (it->feature_per_frame.size() == 0)
                 feature.erase(it);

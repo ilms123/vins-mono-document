@@ -190,7 +190,12 @@ namespace cv {
 }
 
 
-//Rotation表示最新一帧到第l帧的旋转
+/*Rotation表示最新一帧到第l帧的旋转
+求解最新一帧到参考帧l的变换 Tli
+1)通过两帧的对应点，计算两帧之间的E、F矩阵；
+2）对E矩阵分解，求的两帧之间的相对变换，以及内点
+3）inliner>12  true   否则false
+*/
 bool MotionEstimator::solveRelativeRT(const vector<pair<Vector3d, Vector3d>> &corres, Matrix3d &Rotation, Vector3d &Translation)
 {
     if (corres.size() >= 15)

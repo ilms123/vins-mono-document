@@ -28,8 +28,8 @@ private:
                     cv::Mat_<double> &t1, cv::Mat_<double> &t2);
     int frame_count;
 
-    vector<Matrix3d> Rc;
-    vector<Matrix3d> Rimu;
+    vector<Matrix3d> Rc;    //R_{ck+1,ck} 表示k时刻相机到k+1时刻相机的变换   相邻帧之间的旋转矩阵
+    vector<Matrix3d> Rimu;  //R_{bk+1,bk}   IMU预积分得到的旋转矩阵
     vector<Matrix3d> Rc_g;
     Matrix3d ric;
 };

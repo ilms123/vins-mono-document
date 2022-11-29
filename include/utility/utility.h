@@ -63,6 +63,7 @@ class Utility
         return ans;
     }
 
+    //将R转化为 yaw pitch roll   ZYX旋转
     static Eigen::Vector3d R2ypr(const Eigen::Matrix3d &R)
     {
         Eigen::Vector3d n = R.col(0);
@@ -88,18 +89,20 @@ class Utility
         Scalar_t y = ypr(0) / 180.0 * M_PI;
         Scalar_t p = ypr(1) / 180.0 * M_PI;
         Scalar_t r = ypr(2) / 180.0 * M_PI;
-
-        Eigen::Matrix<Scalar_t, 3, 3> Rz;
+        /*绕定轴XYZ的旋转，分别对应 R-P-Y角
+        定轴：左乘   R = Rz * Ry *Rx
+        */
+        Eigen::Matrix<Scalar_t, 3, 3> Rz;   //yaw绕z轴旋转，第3次旋转
         Rz << cos(y), -sin(y), 0,
             sin(y), cos(y), 0,
             0, 0, 1;
 
-        Eigen::Matrix<Scalar_t, 3, 3> Ry;
+        Eigen::Matrix<Scalar_t, 3, 3> Ry;    //pitch绕y轴旋转，第2次旋转
         Ry << cos(p), 0., sin(p),
             0., 1., 0.,
             -sin(p), 0., cos(p);
 
-        Eigen::Matrix<Scalar_t, 3, 3> Rx;
+        Eigen::Matrix<Scalar_t, 3, 3> Rx;    //roll绕x轴旋转，第1次旋转
         Rx << 1., 0., 0.,
             0., cos(r), -sin(r),
             0., sin(r), cos(r);

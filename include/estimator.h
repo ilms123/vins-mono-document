@@ -78,10 +78,11 @@ class Estimator
 
     Matrix3d ric[NUM_OF_CAM];
     Vector3d tic[NUM_OF_CAM];
-
-    Vector3d Ps[(WINDOW_SIZE + 1)];  //Cmaera系下，存储的是滑窗内每个图像帧对于世界坐标系的变量 Pwi
-    Vector3d Vs[(WINDOW_SIZE + 1)];
-    Matrix3d Rs[(WINDOW_SIZE + 1)];
+    
+    //初始化结束时，保存的是Ps_w_bi
+    Vector3d Ps[(WINDOW_SIZE + 1)];  //Cmaera系下，存储的是滑窗内每个图像帧对于世界坐标系的变量 Pwci 
+    Vector3d Vs[(WINDOW_SIZE + 1)];  //在世界坐标系下的速度
+    Matrix3d Rs[(WINDOW_SIZE + 1)];  //Rw_bi  (中间步骤存储R_cl_bi，在初始化校正后，变为Rw_bi）
     Vector3d Bas[(WINDOW_SIZE + 1)];
     Vector3d Bgs[(WINDOW_SIZE + 1)];
     double td;
@@ -116,7 +117,7 @@ class Estimator
 
     double para_Pose[WINDOW_SIZE + 1][SIZE_POSE];  //tx,ty,tz,qx,qy,qz,qw
     double para_SpeedBias[WINDOW_SIZE + 1][SIZE_SPEEDBIAS];  // v, Ba, Bg
-    double para_Feature[NUM_OF_F][SIZE_FEATURE];    //存储的是滑窗内的值？？
+    double para_Feature[NUM_OF_F][SIZE_FEATURE];    //存储的是滑窗内的值？？（整个跟踪过程中的有效特征）
     double para_Ex_Pose[NUM_OF_CAM][SIZE_POSE];
     double para_Retrive_Pose[SIZE_POSE];
     double para_Td[1][1];

@@ -77,7 +77,6 @@ void Problem::ResizePoseHessiansWhenAddingPose(shared_ptr<Vertex> v) {
     b_prior_.tail(v->LocalDimension()).setZero();
     H_prior_.rightCols(v->LocalDimension()).setZero();
     H_prior_.bottomRows(v->LocalDimension()).setZero();
-
 }
 void Problem::ExtendHessiansPriorSize(int dim)
 {
@@ -118,6 +117,7 @@ bool Problem::AddEdge(shared_ptr<Edge> edge) {
 
 vector<shared_ptr<Edge>> Problem::GetConnectedEdges(std::shared_ptr<Vertex> vertex) {
     vector<shared_ptr<Edge>> edges;
+    // range的返回类型为std::pair <std::unordered_multimap<unsigned long, std::shared_ptr<Edge>>::iterator, std::unordered_multimap<unsigned long, std::shared_ptr<Edge>>::iterator> ret
     auto range = vertexToEdge_.equal_range(vertex->Id());
     for (auto iter = range.first; iter != range.second; ++iter) {
 
@@ -179,7 +179,7 @@ bool Problem::Solve(int iterations) {
     SetOrdering();
     // 遍历edge, 构建 H 矩阵
     MakeHessian();
-    // LM 初始化
+    // LM 初始化，计算lamda
     ComputeLambdaInitLM();
     // LM 算法迭代求解
     bool stop = false;
@@ -193,7 +193,7 @@ bool Problem::Solve(int iterations) {
         {
             // setLambda
 //            AddLambdatoHessianLM();
-            // 第四步，解线性方程
+            // 第四步，解线性方程  x=(位置，点)
             SolveLinearSystem();
             //
 //            RemoveLambdaHessianLM();
@@ -209,7 +209,7 @@ bool Problem::Solve(int iterations) {
 
             // 更新状态量
             UpdateStates();
-            // 判断当前步是否可行以及 LM 的 lambda 怎么更新, chi2 也计算一下
+            // 判断误差是否为下降状态以及 LM 的 lambda 怎么更新, chi2 也计算一下
             oneStepSuccess = IsGoodStepInLM();
             // 后续处理，
             if (oneStepSuccess) {
@@ -234,8 +234,8 @@ bool Problem::Solve(int iterations) {
 
         // 优化退出条件3： currentChi_ 跟第一次的 chi2 相比，下降了 1e6 倍则退出
         // TODO:: 应该改成前后两次的误差已经不再变化
-//        if (sqrt(currentChi_) <= stopThresholdLM_)
-//        if (sqrt(currentChi_) < 1e-15)
+        //if (sqrt(currentChi_) <= stopThresholdLM_)
+        //if (sqrt(currentChi_) < 1e-15)
         if(last_chi_ - currentChi_ < 1e-5)
         {
             std::cout << "sqrt(currentChi_) <= stopThresholdLM_" << std::endl;
@@ -280,8 +280,7 @@ void Problem::SetOrdering() {
             );
         }
     }
-
-//    CHECK_EQ(CheckOrdering(), true);
+    //    CHECK_EQ(CheckOrdering(), true);
 }
 
 bool Problem::CheckOrdering() {
@@ -308,9 +307,9 @@ void Problem::MakeHessian() {
     VecX b(VecX::Zero(size));
 
     // TODO:: accelate, accelate, accelate
-//#ifdef USE_OPENMP
-//#pragma omp parallel for
-//#endif
+    //#ifdef USE_OPENMP
+    //#pragma omp parallel for
+    //#endif
     for (auto &edge: edges_) {
 
         edge.second->ComputeResidual();
@@ -361,14 +360,14 @@ void Problem::MakeHessian() {
     Hessian_ = H;
     b_ = b;
     t_hessian_cost_ += t_h.toc();
-
+    //将先验信息添加到H矩阵中
     if(H_prior_.rows() > 0)
     {
         MatXX H_prior_tmp = H_prior_;
         VecX b_prior_tmp = b_prior_;
 
-        /// 遍历所有 POSE 顶点，然后设置相应的先验维度为 0 .  fix 外参数, SET PRIOR TO ZERO
-        /// landmark 没有先验
+        /// 遍历所有 POSE 顶点，然后设置fixed pose的先验维度为 0 .  fix 外参数, SET PRIOR TO ZERO
+        ///
         for (auto vertex: verticies_) {
             if (IsPoseVertex(vertex.second) && vertex.second->IsFixed() ) {
                 int idx = vertex.second->OrderingId();
@@ -384,13 +383,12 @@ void Problem::MakeHessian() {
     }
 
     delta_x_ = VecX::Zero(size);  // initial delta_x = 0_n;
-
-
 }
 
 /*
  * Solve Hx = b, we can use PCG iterative method or use sparse Cholesky
  */
+//求解hessian矩阵，利用舒尔补加速求解（先求解与pose相关的delta，再求解与landmark相关的delta)
 void Problem::SolveLinearSystem() {
 
 
@@ -425,7 +423,7 @@ void Problem::SolveLinearSystem() {
         }
 
         MatXX tempH = Hpm * Hmm_inv;
-        H_pp_schur_ = Hessian_.block(0, 0, ordering_poses_, ordering_poses_) - tempH * Hmp;
+        H_pp_schur_ = Hessian_.block(0, 0, ordering_poses_, ordering_poses_) - tempH * Hmp;    //信息矩阵为hession矩阵？？ 第4讲（38）
         b_pp_schur_ = bpp - tempH * bmm;
 
         // step2: solve Hpp * delta_x = bpp
@@ -537,6 +535,7 @@ void Problem::RemoveLambdaHessianLM() {
         Hessian_(i, i) -= currentLambda_;
     }
 }
+// https://blog.csdn.net/weixin_40224537/article/details/106008334
 
 bool Problem::IsGoodStepInLM() {
     double scale = 0;
@@ -611,21 +610,25 @@ VecX Problem::PCGSolver(const MatXX &A, const VecX &b, int maxIter = -1) {
 
 /*
  *  marg 所有和 frame 相连的 edge: imu factor, projection factor
- *  如果某个landmark和该frame相连，但是又不想加入marg, 那就把改edge先去掉
- *
+ 1)对于与边相连的对应点，构建H矩阵；
+ 2）H矩阵的两步marg：a.marg掉需要删除的landmark，获得只有pose vertex的H矩阵；b.marg掉要删除的vertex，获得H_prior_ ，b_prior_
+ 3）从H_prior_ ，b_prior_中恢复雅可比和残差，更新Jt_prior_inv_ ， err_prior_ 
+ 4）移出需要删除的点和边
+ *  如果某个landmark和该frame相连，但是又不想加入marg, 那就把该edge先去掉
+ *  输出/更新：H_prior_ ，b_prior_，Jt_prior_inv_ ， err_prior_ 
  */
 bool Problem::Marginalize(const std::vector<std::shared_ptr<Vertex> > margVertexs, int pose_dim) {
 
     SetOrdering();
-    /// 找到需要 marg 的 edge, margVertexs[0] is frame, its edge contained pre-intergration
+    /// 找到需要 marg 的 edge, 即要边缘化掉的顶点对应的边 margVertexs[0] is frame, its edge contained pre-intergration
     std::vector<shared_ptr<Edge>> marg_edges = GetConnectedEdges(margVertexs[0]);
 
-    std::unordered_map<int, shared_ptr<Vertex>> margLandmark;
+    std::unordered_map<int, shared_ptr<Vertex>> margLandmark;   //存储将要marg掉的边对应的landmark顶点
     // 构建 Hessian 的时候 pose 的顺序不变，landmark的顺序要重新设定
     int marg_landmark_size = 0;
-//    std::cout << "\n marg edge 1st id: "<< marg_edges.front()->Id() << " end id: "<<marg_edges.back()->Id()<<std::endl;
+    //std::cout << "\n marg edge 1st id: "<< marg_edges.front()->Id() << " end id: "<<marg_edges.back()->Id()<<std::endl;
     for (size_t i = 0; i < marg_edges.size(); ++i) {
-//        std::cout << "marg edge id: "<< marg_edges[i]->Id() <<std::endl;
+    //  std::cout << "marg edge id: "<< marg_edges[i]->Id() <<std::endl;
         auto verticies = marg_edges[i]->Verticies();
         for (auto iter : verticies) {
             if (IsLandmarkVertex(iter) && margLandmark.find(iter->Id()) == margLandmark.end()) {
@@ -635,9 +638,9 @@ bool Problem::Marginalize(const std::vector<std::shared_ptr<Vertex> > margVertex
             }
         }
     }
-//    std::cout << "pose dim: " << pose_dim <<std::endl;
+    //std::cout << "pose dim: " << pose_dim <<std::endl;
     int cols = pose_dim + marg_landmark_size;
-    /// 构建误差 H 矩阵 H = H_marg + H_pp_prior
+    ///构建误差 H 矩阵 H = H_marg + H_pp_prior
     MatXX H_marg(MatXX::Zero(cols, cols));
     VecX b_marg(VecX::Zero(cols));
     int ii = 0;
@@ -645,7 +648,7 @@ bool Problem::Marginalize(const std::vector<std::shared_ptr<Vertex> > margVertex
         edge->ComputeResidual();
         edge->ComputeJacobians();
         auto jacobians = edge->Jacobians();
-        auto verticies = edge->Verticies();
+        auto verticies = edge->Verticies();   //有landmark, pose
         ii++;
 
         assert(jacobians.size() == verticies.size());
@@ -681,7 +684,7 @@ bool Problem::Marginalize(const std::vector<std::shared_ptr<Vertex> > margVertex
     }
         std::cout << "edge factor cnt: " << ii <<std::endl;
 
-    /// marg landmark
+    /// 共两步marg，获得H_prior_，b_prior_:1)marg landmark标记点
     int reserve_size = pose_dim;
     if (marg_landmark_size > 0) {
         int marg_size = marg_landmark_size;
@@ -704,7 +707,7 @@ bool Problem::Marginalize(const std::vector<std::shared_ptr<Vertex> > margVertex
         MatXX Hpp = H_marg.block(0, 0, reserve_size, reserve_size) - tempH * Hmp;
         bpp = bpp - tempH * bmm;
         H_marg = Hpp;
-        b_marg = bpp;
+        b_marg = bpp;   //已经marg掉 marg_landmark保留下来的部分
     }
 
     VecX b_prior_before = b_prior_;
@@ -715,19 +718,19 @@ bool Problem::Marginalize(const std::vector<std::shared_ptr<Vertex> > margVertex
     }
 
     /// marg frame and speedbias
+    //2）marg掉pose 和speedbias
     int marg_dim = 0;
-
     // index 大的先移动
     for (int k = margVertexs.size() -1 ; k >= 0; --k)
     {
 
         int idx = margVertexs[k]->OrderingId();
         int dim = margVertexs[k]->LocalDimension();
-//        std::cout << k << " "<<idx << std::endl;
+        //std::cout << k << " "<<idx << std::endl;
         marg_dim += dim;
         // move the marg pose to the Hmm bottown right
         // 将 row i 移动矩阵最下面
-        Eigen::MatrixXd temp_rows = H_marg.block(idx, 0, dim, reserve_size);
+        Eigen::MatrixXd temp_rows = H_marg.block(idx, 0, dim, reserve_size);  //将要marg掉的内容
         Eigen::MatrixXd temp_botRows = H_marg.block(idx + dim, 0, reserve_size - idx - dim, reserve_size);
         H_marg.block(idx, 0, reserve_size - idx - dim, reserve_size) = temp_botRows;
         H_marg.block(reserve_size - dim, 0, dim, reserve_size) = temp_rows;
@@ -746,10 +749,10 @@ bool Problem::Marginalize(const std::vector<std::shared_ptr<Vertex> > margVertex
 
     double eps = 1e-8;
     int m2 = marg_dim;
-    int n2 = reserve_size - marg_dim;   // marg pose
-    Eigen::MatrixXd Amm = 0.5 * (H_marg.block(n2, n2, m2, m2) + H_marg.block(n2, n2, m2, m2).transpose());
+    int n2 = reserve_size - marg_dim;   // marg pose  ，
+    Eigen::MatrixXd Amm = 0.5 * (H_marg.block(n2, n2, m2, m2) + H_marg.block(n2, n2, m2, m2).transpose());  //pose相关需要marg掉的部分
 
-    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> saes(Amm);
+    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> saes(Amm);   //自伴随矩阵  A=V*D*V^-1  （V特征值对应的特征向量，D特征值（>0)构成的对角阵）
     Eigen::MatrixXd Amm_inv = saes.eigenvectors() * Eigen::VectorXd(
             (saes.eigenvalues().array() > eps).select(saes.eigenvalues().array().inverse(), 0)).asDiagonal() *
                               saes.eigenvectors().transpose();
@@ -760,9 +763,11 @@ bool Problem::Marginalize(const std::vector<std::shared_ptr<Vertex> > margVertex
     Eigen::MatrixXd Arr = H_marg.block(0, 0, n2, n2);
     Eigen::VectorXd brr = b_marg.segment(0, n2);
     Eigen::MatrixXd tempB = Arm * Amm_inv;
-    H_prior_ = Arr - tempB * Amr;
+    H_prior_ = Arr - tempB * Amr;    //marg掉相机pose和speedbias后的hession矩阵
     b_prior_ = brr - tempB * bmm2;
 
+    //??????从A和b中恢复出雅克比矩阵和残差
+    //参考  https://blog.csdn.net/weixin_37651030/article/details/102683201
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> saes2(H_prior_);
     Eigen::VectorXd S = Eigen::VectorXd((saes2.eigenvalues().array() > eps).select(saes2.eigenvalues().array(), 0));
     Eigen::VectorXd S_inv = Eigen::VectorXd(

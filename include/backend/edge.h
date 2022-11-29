@@ -129,7 +129,7 @@ protected:
     int ordering_id_;   //edge id in problem
     std::vector<std::string> verticies_types_;  // 各顶点类型信息，用于debug
     std::vector<std::shared_ptr<Vertex>> verticies_; // 该边对应的顶点
-    VecX residual_;                 // 残差
+    VecX residual_;                 // 残差 =计算-观测
     std::vector<MatXX> jacobians_;  // 雅可比，每个雅可比维度是 residual x vertex[i]
     MatXX information_;             // 信息矩阵
     MatXX sqrt_information_;

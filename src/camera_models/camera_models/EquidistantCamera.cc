@@ -434,7 +434,7 @@ EquidistantCamera::liftProjective(const Eigen::Vector2d& p, Eigen::Vector3d& P) 
            m_inv_K22 * p(1) + m_inv_K23;
 
     // Obtain a projective ray
-    double theta, phi;
+    double theta, phi;  //phi表示与水平面x轴夹角
     backprojectSymmetric(p_u, theta, phi);
 
     P(0) = sin(theta) * cos(phi);
@@ -712,7 +712,7 @@ EquidistantCamera::fitOddPoly(const std::vector<double>& x, const std::vector<do
         coeffs.at(i) = A(i,0);
     }
 }
-
+//phi表示与水平面x轴夹角
 void
 EquidistantCamera::backprojectSymmetric(const Eigen::Vector2d& p_u,
                                         double& theta, double& phi) const

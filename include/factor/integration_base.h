@@ -19,10 +19,10 @@ class IntegrationBase
 
     {
         noise = Eigen::Matrix<double, 18, 18>::Zero();
-        noise.block<3, 3>(0, 0) =  (ACC_N * ACC_N) * Eigen::Matrix3d::Identity();  // 加速度的噪声：n_a 
-        noise.block<3, 3>(3, 3) =  (GYR_N * GYR_N) * Eigen::Matrix3d::Identity();  // 陀螺仪的噪声：n_g   
-        noise.block<3, 3>(6, 6) =  (ACC_N * ACC_N) * Eigen::Matrix3d::Identity();
-        noise.block<3, 3>(9, 9) =  (GYR_N * GYR_N) * Eigen::Matrix3d::Identity();
+        noise.block<3, 3>(0, 0) =  (ACC_N * ACC_N) * Eigen::Matrix3d::Identity();  //k时刻 加速度的噪声：n_a 
+        noise.block<3, 3>(3, 3) =  (GYR_N * GYR_N) * Eigen::Matrix3d::Identity();  //k时刻 陀螺仪的噪声：n_g   
+        noise.block<3, 3>(6, 6) =  (ACC_N * ACC_N) * Eigen::Matrix3d::Identity();   //k+1时刻 加速度的噪声：n_a 
+        noise.block<3, 3>(9, 9) =  (GYR_N * GYR_N) * Eigen::Matrix3d::Identity();   //k+1时刻 陀螺仪的噪声：n_g 
         noise.block<3, 3>(12, 12) =  (ACC_W * ACC_W) * Eigen::Matrix3d::Identity();  // 加速度偏置的噪声n_ba
         noise.block<3, 3>(15, 15) =  (GYR_W * GYR_W) * Eigen::Matrix3d::Identity();  // 陀螺仪偏置的噪声n_bg
     }
@@ -51,18 +51,19 @@ class IntegrationBase
         for (int i = 0; i < static_cast<int>(dt_buf.size()); i++)
             propagate(dt_buf[i], acc_buf[i], gyr_buf[i]);
     }
-
+   
     void midPointIntegration(double _dt, 
-                            const Eigen::Vector3d &_acc_0, const Eigen::Vector3d &_gyr_0,
-                            const Eigen::Vector3d &_acc_1, const Eigen::Vector3d &_gyr_1,
+                            const Eigen::Vector3d &_acc_0, const Eigen::Vector3d &_gyr_0,   //k测量值
+                            const Eigen::Vector3d &_acc_1, const Eigen::Vector3d &_gyr_1,   //k+1测量值
                             const Eigen::Vector3d &delta_p, const Eigen::Quaterniond &delta_q, const Eigen::Vector3d &delta_v,
                             const Eigen::Vector3d &linearized_ba, const Eigen::Vector3d &linearized_bg,
                             Eigen::Vector3d &result_delta_p, Eigen::Quaterniond &result_delta_q, Eigen::Vector3d &result_delta_v,
                             Eigen::Vector3d &result_linearized_ba, Eigen::Vector3d &result_linearized_bg, bool update_jacobian)
     {
         //ROS_INFO("midpoint integration");
-        //计算预积分量 alpha, beta ,q 
-        Vector3d un_acc_0 = delta_q * (_acc_0 - linearized_ba);  //delta_q为q_bi_bk   result_delta_p为q_bi_bk+1
+        //delta_q为q_bi_bk   result_delta_p为q_bi_bk+1        delta_q为qwbk表示bk时刻到世界坐标（下一imu时刻）的旋转预积分
+        //计算预积分量 alpha, beta ,q 第三章ppt (33)
+        Vector3d un_acc_0 = delta_q * (_acc_0 - linearized_ba);    //
         Vector3d un_gyr = 0.5 * (_gyr_0 + _gyr_1) - linearized_bg;
         result_delta_q = delta_q * Quaterniond(1, un_gyr(0) * _dt / 2, un_gyr(1) * _dt / 2, un_gyr(2) * _dt / 2);
         Vector3d un_acc_1 = result_delta_q * (_acc_1 - linearized_ba);
@@ -88,7 +89,7 @@ class IntegrationBase
             R_a_1_x<<0, -a_1_x(2), a_1_x(1),
                 a_1_x(2), 0, -a_1_x(0),
                 -a_1_x(1), a_1_x(0), 0;
-
+            // 第三章ppt(43)。对预积分量计算表示
             MatrixXd F = MatrixXd::Zero(15, 15);
             F.block<3, 3>(0, 0) = Matrix3d::Identity();
             F.block<3, 3>(0, 3) = -0.25 * delta_q.toRotationMatrix() * R_a_0_x * _dt * _dt + 
@@ -130,7 +131,10 @@ class IntegrationBase
 
     }
 
-    //传入参数是第k+1时刻
+    /*输入：传入参数是第k+1时刻a w的测量值
+    输出： 1）更新k+1时刻的imu的预积分（delta_p,q,v)以及linearized_ba，bg
+          2)更新IMU预积分的Jacobian和协方差covariance
+    */
     void propagate(double _dt, const Eigen::Vector3d &_acc_1, const Eigen::Vector3d &_gyr_1)
     {
         dt = _dt;
@@ -142,6 +146,7 @@ class IntegrationBase
         Vector3d result_linearized_ba;
         Vector3d result_linearized_bg;
 
+        //1.计算imu的预积分（q alpha beta)以及ba\bg  2.更新IMU的Jacobian和协方差covariance
         midPointIntegration(_dt, acc_0, gyr_0, _acc_1, _gyr_1, delta_p, delta_q, delta_v,
                             linearized_ba, linearized_bg,
                             result_delta_p, result_delta_q, result_delta_v,
@@ -149,6 +154,7 @@ class IntegrationBase
 
         //checkJacobian(_dt, acc_0, gyr_0, acc_1, gyr_1, delta_p, delta_q, delta_v,
         //                    linearized_ba, linearized_bg);
+        //k+1时刻的imu预积分
         delta_p = result_delta_p;
         delta_q = result_delta_q;
         delta_v = result_delta_v;
@@ -174,10 +180,10 @@ class IntegrationBase
         Eigen::Matrix3d dv_dba = jacobian.block<3, 3>(O_V, O_BA);
         Eigen::Matrix3d dv_dbg = jacobian.block<3, 3>(O_V, O_BG);
 
-        Eigen::Vector3d dba = Bai - linearized_ba;
+        Eigen::Vector3d dba = Bai - linearized_ba;   //偏差=真实值（相机获得）-估计值（IMU预积分获得）
         Eigen::Vector3d dbg = Bgi - linearized_bg;
 
-        Eigen::Quaterniond corrected_delta_q = delta_q * Utility::deltaQ(dq_dbg * dbg);
+        Eigen::Quaterniond corrected_delta_q = delta_q * Utility::deltaQ(dq_dbg * dbg);   //第三章ppt （77）
         Eigen::Vector3d corrected_delta_v = delta_v + dv_dba * dba + dv_dbg * dbg;
         Eigen::Vector3d corrected_delta_p = delta_p + dp_dba * dba + dp_dbg * dbg;
 
@@ -189,12 +195,12 @@ class IntegrationBase
         return residuals;
     }
 
-    double dt;
-    Eigen::Vector3d acc_0, gyr_0;
-    Eigen::Vector3d acc_1, gyr_1;
+    double dt;                        //k到k+1时刻的时间间隔
+    Eigen::Vector3d acc_0, gyr_0;    //k时刻imu的测量值
+    Eigen::Vector3d acc_1, gyr_1;   //k+1时刻imu的测量值
 
     const Eigen::Vector3d linearized_acc, linearized_gyr;
-    Eigen::Vector3d linearized_ba, linearized_bg;
+    Eigen::Vector3d linearized_ba, linearized_bg;     //估计值？？？
 
     Eigen::Matrix<double, 15, 15> jacobian, covariance;
     Eigen::Matrix<double, 15, 15> step_jacobian;
@@ -202,11 +208,11 @@ class IntegrationBase
     Eigen::Matrix<double, 18, 18> noise;
 
     double sum_dt;
-    Eigen::Vector3d delta_p;
-    Eigen::Quaterniond delta_q;
+    Eigen::Vector3d delta_p;    //预积分 alpha   q_w_bk 表示bk到世界坐标系的旋转预积分     q_bi_bk  q_bk+1_bk
+    Eigen::Quaterniond delta_q;   //???q_bk_bk+1
     Eigen::Vector3d delta_v;
 
-    std::vector<double> dt_buf;
+    std::vector<double> dt_buf;         //imu每个时刻的测量值
     std::vector<Eigen::Vector3d> acc_buf;
     std::vector<Eigen::Vector3d> gyr_buf;
 

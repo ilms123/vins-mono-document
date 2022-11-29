@@ -32,12 +32,12 @@ void EdgeReprojection::ComputeResidual() {
     Qd qic(param_ext[6], param_ext[3], param_ext[4], param_ext[5]);
     Vec3 tic = param_ext.head<3>();
 
-    Vec3 pts_camera_i = pts_i_ / inv_dep_i;
+    Vec3 pts_camera_i = pts_i_ / inv_dep_i;   //变换为xyz形式
     Vec3 pts_imu_i = qic * pts_camera_i + tic;
     Vec3 pts_w = Qi * pts_imu_i + Pi;
     Vec3 pts_imu_j = Qj.inverse() * (pts_w - Pj);
     Vec3 pts_camera_j = qic.inverse() * (pts_imu_j - tic);
-
+    //残差=计算-观测
     double dep_j = pts_camera_j.z();
     residual_ = (pts_camera_j / dep_j).head<2>() - pts_j_.head<2>();   /// J^t * J * delta_x = - J^t * r
 //    residual_ = information_ * residual_;   // remove information here, we multi information matrix in problem solver

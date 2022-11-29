@@ -15,7 +15,7 @@ using namespace Eigen;
 // #include <ros/assert.h>
 
 #include "parameters.h"
-
+//feature在某一帧下的坐标
 class FeaturePerFrame
 {
 public:
@@ -41,7 +41,7 @@ public:
   VectorXd b;
   double dep_gradient;
 };
-
+// 某feature_id下的所有FeaturePerFrame
 class FeaturePerId
 {
 public:
@@ -52,7 +52,7 @@ public:
   int used_num;
   bool is_outlier;
   bool is_margin;
-  double estimated_depth;
+  double estimated_depth;   //初次观测到的相机帧的深度
   int solve_flag; // 0 haven't solve yet; 1 solve succ; 2 solve fail;
 
   Vector3d gt_p;
